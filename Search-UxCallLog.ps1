@@ -1,25 +1,34 @@
 ﻿<#
     .SYNOPSIS
 
-    This is a tool to search through Sonus/Ribbon SBC call logs and display associsated routing information
+    This is a tool to search through Sonus/Ribbon SBC call logs and display associated routing information
 
     .DESCRIPTION
+    This tool does it's best to display call routes from Sonus/Ribbon UX logfiles in a friendly manner without needing tools like LX installed
+
+    Why?
+    I got so sick and tired of firing up LX every single time a call went "awry" when customers called only to find someone else had re-installed LX on their profile causing the installation to break on mine
+    For people that only support a pair of SBC's maybe you can just run LX on your PC.. but for consultants, we have to get the files off the SBC.. then out of the customers environment and thats usualy a PITA. 
+    Needless to say, even with LX you still need to read all the ROUTE entries by hand anyway.
+
+    So I wrote this script to give everyone a simple way to see what rules calls are bouncing off to ease troubleshooting a bit.
+
 
     Created by James Arber. www.UcMadScientist.com
     
     .NOTES
 
-    Version                : 1.0
-    Date                   : 20/12/2021 #todo
+    Version                : 0.1.1
+    Date                   : 03/01/2022
     Author                 : James Arber
     Header stolen from     : Greig Sheridan who stole it from Pat Richard's amazing "Get-CsConnections.ps1"
 
 
-    :v1.0: Initial Release
+    :v0.1: Beta Release
 
     Disclaimer: Whilst I take considerable effort to ensure this script is error free and wont harm your enviroment.
     I have no way to test every possible senario it may be used in. I provide these scripts free
-    to the Lync and Skype4B community AS IS without any warranty on it's appropriateness for use in
+    to the Skype4B and Teams community AS IS without any warranty on it's appropriateness for use in
     your environment. I disclaim all implied warranties including,
     without limitation, any implied warranties of merchantability or of fitness for a particular
     purpose. The entire risk arising out of the use or performance of the sample scripts and
@@ -39,14 +48,17 @@
     Michel de Rooij	http://eightwone.com
 
     .LINK
-    https://www.UcMadScientist.com/preparing-for-teams-export-your-on-prem-lis-data-for-cqd/
+    https://www.UcMadScientist.com/preparing-for-teams-export-your-on-prem-lis-data-for-cqd/ #todo
 
     .KNOWN ISSUES
-    Check https://github.com/Atreidae/Export-LisDataForCQD/issues/
+    Large amounts of simultaneous calls can cause the script to get confused if invites are logged out of order
+    Call Diversion Invites arent handled properly
+    If the script presently cant find an appropriate call invite, it will export a text file of that call for later viewing
+    Check https://github.com/Atreidae/Search-UxCallLog/issues/ for more
 
     .EXAMPLE
-    Exports current LIS data as a CQD compliant CSV in the current folder.
-    PS C:\> Export-LisDataForCQD.ps1
+    Enumerates calls in WebUi.log and outputs each call to the pipeline
+    PS C:\> Search-UxCallLog.ps1 -InputFile Webui.log
 
 #>
 
@@ -54,7 +66,8 @@
 param
 (
   [switch]$SkipUpdateCheck,
-  [String]$script:LogFileLocation = $null
+  [String]$script:LogFileLocation = $null,
+  [String]$InputFile = "./Webui.log"
 )
 
 If (!$script:LogFileLocation) 
@@ -66,7 +79,7 @@ If (!$script:LogFileLocation)
 [Net.ServicePointManager]::SecurityProtocol = 'tls12, tls11, tls'
 $StartTime                          = Get-Date
 $VerbosePreference                  = 'SilentlyContinue' #TODO
-[String]$ScriptVersion              = '0.1.0'
+[String]$ScriptVersion              = '0.1.1'
 [string]$GithubRepo                 = 'Search-UxCallLog'
 [string]$GithubBranch               = 'master' #todo
 [string]$BlogPost                   = 'https://www.UcMadScientist.com/preparing-for-teams-export-your-on-prem-lis-data-for-cqd/' #todo
@@ -90,13 +103,13 @@ Function Write-UcmLog {
       Sets the severity of the log message, Higher severities will call Write-Warning or Write-Error
 
       .PARAMETER Component
-      Used to track the module or function that called "Write-Log" 
+      Used to track the module or function that called "Write-UcmLog" 
 
       .PARAMETER LogOnly
-      Forces Write-Log to not display anything to the user
+      Forces Write-UcmLog to not display anything to the user
 
       .EXAMPLE
-      Write-Log -Message 'This is a log message' -Severity 3 -component 'Example Component'
+      Write-UcmLog -Message 'This is a log message' -Severity 3 -component 'Example Component'
       Writes a log file message and displays a warning to the user
 
       .REQUIRED FUNCTIONS
@@ -181,14 +194,14 @@ Function Write-UcmLog {
 Function Get-IEProxy
 {
   $function = 'Get-IEProxy'
-  Write-Log -component $function -Message 'Checking for IE First Run' -severity 1
+  Write-UcmLog -component $function -Message 'Checking for IE First Run' -severity 1
   if ((Get-Item -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings').Property -NotContains 'ProxyEnable')
   {
     $null = New-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings' -Name ProxyEnable -Value 0
   }
   
 
-  Write-Log -component $function -Message 'Checking for Proxy' -severity 1
+  Write-UcmLog -component $function -Message 'Checking for Proxy' -severity 1
   If ( (Get-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings').ProxyEnable -ne 0)
   {
     $proxies = (Get-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings').proxyServer
@@ -219,30 +232,30 @@ Function Get-IEProxy
 Function Get-ScriptUpdate 
 {
   $function = 'Get-ScriptUpdate'
-  Write-Log -component $function -Message 'Checking for Script Update' -severity 1
-  Write-Log -component $function -Message 'Checking for Proxy' -severity 1
+  Write-UcmLog -component $function -Message 'Checking for Script Update' -severity 1
+  Write-UcmLog -component $function -Message 'Checking for Proxy' -severity 1
   $ProxyURL = Get-IEProxy
   
   If ($ProxyURL)
   
   {
-    Write-Log -component $function -Message "Using proxy address $ProxyURL" -severity 1
+    Write-UcmLog -component $function -Message "Using proxy address $ProxyURL" -severity 1
   }
   
   Else
   {
-    Write-Log -component $function -Message 'No proxy setting detected, using direct connection' -severity 1
+    Write-UcmLog -component $function -Message 'No proxy setting detected, using direct connection' -severity 1
   }
 
-  Write-Log -component $function -Message "Polling https://raw.githubusercontent.com/atreidae/$GithubRepo/$GithubBranch/version" -severity 1
+  Write-UcmLog -component $function -Message "Polling https://raw.githubusercontent.com/atreidae/$GithubRepo/$GithubBranch/version" -severity 1
   $GitHubScriptVersion = Invoke-WebRequest -Uri "https://raw.githubusercontent.com/atreidae/$GithubRepo/$GithubBranch/version" -TimeoutSec 10 -Proxy $ProxyURL -UseBasicParsing
   
   If ($GitHubScriptVersion.Content.length -eq 0) 
   {
     #Empty data, throw an error
-    Write-Log -component $function -Message 'Error checking for new version. You can check manually using the url below' -severity 3
-    Write-Log -component $function -Message $BlogPost -severity 3 
-    Write-Log -component $function -Message 'Pausing for 5 seconds' -severity 1
+    Write-UcmLog -component $function -Message 'Error checking for new version. You can check manually using the url below' -severity 3
+    Write-UcmLog -component $function -Message $BlogPost -severity 3 
+    Write-UcmLog -component $function -Message 'Pausing for 5 seconds' -severity 1
     Start-Sleep -Seconds 5
   }
   else
@@ -259,7 +272,7 @@ Function Get-ScriptUpdate
     {
       $Needupdate = $true
       #New Major Build available, #Prompt user to download
-      Write-Log -component $function -Message 'New Major Version Available' -severity 3
+      Write-UcmLog -component $function -Message 'New Major Version Available' -severity 3
       $title = 'Update Available'
       $Message = 'a major update to this script is available, did you want to download it?'
     }
@@ -268,7 +281,7 @@ Function Get-ScriptUpdate
     {
       $Needupdate = $true
       #New Major Build available, #Prompt user to download
-      Write-Log -component $function -Message 'New Minor Version Available' -severity 3
+      Write-UcmLog -component $function -Message 'New Minor Version Available' -severity 3
       $title = 'Update Available'
       $Message = 'a minor update to this script is available, did you want to download it?'
     }
@@ -277,7 +290,7 @@ Function Get-ScriptUpdate
     {
       $Needupdate = $true
       #New Major Build available, #Prompt user to download
-      Write-Log -component $function -Message 'New Bugfix Available' -severity 3
+      Write-UcmLog -component $function -Message 'New Bugfix Available' -severity 3
       $title = 'Update Available'
       $Message = 'a bugfix update to this script is available, did you want to download it?'
     }
@@ -299,17 +312,17 @@ Function Get-ScriptUpdate
         0 
         {
           #User said yes
-          Write-Log -component $function -Message 'User opted to download update' -severity 1
+          Write-UcmLog -component $function -Message 'User opted to download update' -severity 1
           #start $BlogPost
           Repair-BsInstalledModules -ModuleName 'BounShell' -Operation 'Update'
-          Write-Log -component $function -Message 'Exiting Script' -severity 3
+          Write-UcmLog -component $function -Message 'Exiting Script' -severity 3
           Pause
           exit
         }
         #User said no
         1 
         {
-          Write-Log -component $function -Message 'User opted to skip update' -severity 1
+          Write-UcmLog -component $function -Message 'User opted to skip update' -severity 1
         }
       }
     }
@@ -317,23 +330,23 @@ Function Get-ScriptUpdate
     #We already have the lastest version
     Else
     {
-      Write-Log -component $function -Message 'Script is upto date' -severity 1
+      Write-UcmLog -component $function -Message 'Script is upto date' -severity 1
     }
   }
 }
 
-Write-Log -Message "$GithubRepo.ps1 Version $ScriptVersion" -severity 2
+Write-UcmLog -Message "$GithubRepo.ps1 Version $ScriptVersion" -severity 2
 
 
 #Get Proxy Details
 $ProxyURL = Get-IEProxy
 If ($ProxyURL) 
 {
-  Write-Log -Message "Using proxy address $ProxyURL" -severity 2
+  Write-UcmLog -Message "Using proxy address $ProxyURL" -severity 2
 }
 Else 
 {
-  Write-Log -Message 'No proxy setting detected, using direct connection' -severity 1
+  Write-UcmLog -Message 'No proxy setting detected, using direct connection' -severity 1
 }
 
 #Check for Script update
@@ -346,7 +359,7 @@ if ($SkipUpdateCheck -eq $false)
 $function = "Read-Logs"
 Write-Progress -Activity "Initial Import" -Status 'Importing Raw Log File'
 Write-UcmLog -Message "Importing Log File" -Severity 1 -Component $function
-$RawLogFile = (Get-Content ./webui.log -raw)
+$RawLogFile = (Get-Content $InputFile -raw)
 
 
 #Process data.
@@ -364,12 +377,14 @@ Write-UcmLog -Message "Locating Calls" -Severity 1 -Component $function
 #$CallLocations = (Select-String -InputObject $RawLogFile -Pattern 'Handling initial invite.' -AllMatches -SimpleMatch)
 
 #Method 3 (Return line numbers)
-$CallLocations =  (Select-String -Path ./webui.log -Pattern 'Handling initial invite.')
+$CallLocations =  (Select-String -Path $inputfile -Pattern 'Handling initial invite.')
+$TotalCalls = $CallLocations.Count
 
-Write-UcmLog -Message "Found $($CallLocations.count) Invites." -Severity 2 -Component $function
+Write-UcmLog -Message "Found $TotalCalls Invites." -Severity 2 -Component $function
 
 #Split the log file using the "Handling Initial Invite Marker (This should work for test calls, not just real calls)
 $RawCalls = $RawLogFile -split 'sendToSipUser: Handling initial invite.' -notmatch '^$'
+Remove-Variable -name "RawLogFile"
 
 
 #Process each Call Object
@@ -379,97 +394,139 @@ $CurrentCallNum = 0
 
 Foreach ($RawCall in $RawCalls)
 {
- 
- 
-  $CurrentCallProgress ++
-  
-  
-  Write-Progress -Activity "Processing Calls" -Status "Locating Call $CurrentCallProgress of $($CallLocations.count) details"
-    
+      
   #Skip the first "call" object as it's just whats in the log before the first detected invite
     
   If ($CurrentCallNum -eq 0)
   {
     Write-UcmLog -Message "Skipping Prelogs" -Severity 1 -Component $function
   }
-  #ElseIF ($CurrentCallNum -eq 1) #Todo, only processing one call at the moment
-  Else
+  #ElseIF ($CurrentCallNum -eq 19) #Todo, only processing one call at the moment
+  Else  #Process whole Logfile
   {
+    $CurrentCallProgress ++
+    Write-Progress -Activity "Processing Calls" -Status "Locating Call $CurrentCallProgress of $TotalCalls details"  -PercentComplete ((($CurrentCallProgress) / $TotalCalls) * 100)
     $CurrentCall = [PSCustomObject]@{
       'CallID' = 'Unknown'
       'CallTime' = 'Unknown'
+      'InviteLineNumber' = 'Unknown'
       'OriginalCallingNumber' = 'Unknown'
       'OriginalCalledNumber' = 'Unknown'
       'TranslatedCallingNumber' = 'Unknown'
       'TranslatedCalledNumber' = 'Unknown'
       'RouteTable' = 'Unknown'
       'TransTableMatches' = @()
+      'TransTableFailures' = @()
+      'TransTableEntrySkips' = @()
       'FinalTranslationRule' = 'Unknown'
-      'AllTransMatches' = 'Unknown'
+      #'RouteFound' = $False
     }
+
+    #Setup for Progress Bars
+    $ProgressSteps = 14
+    $currentStep = 1
     
     
-    #Greig Asked for time of invite, that goes here
-  
-  
-    #Calculate the LineNumber of the invite
-    $InviteLine = ($CallLocations[($CurrentCallNum -1)].LineNumber)
-    Write-UcmLog -Message "Found an Invite on line $InviteLine" -Severity 1 -Component $function
+    #Find the Call ID
+    Write-Progress -Activity "Step $currentStep/$ProgressSteps" -id 1 -Status "Call ID" -PercentComplete ((($currentStep) / $ProgressSteps) * 100) ;$currentStep ++
+
     
-    #Call ID
     $CallID = ([regex]::Matches($RawCall,'\]\[CID:(\d*)\]').groups[1].value)
     Write-UcmLog -Message "# Call ID $CallID" -Severity 1 -Component $function
     $CurrentCall.CallID = $callID
     
-    #Find the Called Details
+    #Greig Asked for time of invite, that goes here
+    Write-Progress -Activity "Step $currentStep/$ProgressSteps" -id 1 -Status "Call Time" -PercentComplete ((($currentStep) / $ProgressSteps) * 100) ;$currentStep ++
+
+    $CallTime = ([regex]::Matches($RawCall,'\[(.*),...\]').groups[1].value)
+    Write-UcmLog -Message "# Call ID $CallID" -Severity 1 -Component $function
+    $CurrentCall.CallTime = $CallTime
+    
+    
+    #Calculate the LineNumber of the invite
+    Write-Progress -Activity "Step $currentStep/$ProgressSteps" -id 1 -Status "Call Line Number" -PercentComplete ((($currentStep) / $ProgressSteps) * 100) ;$currentStep ++
+
+    $InviteLineNumber = ($CallLocations[($CurrentCallNum -1)].LineNumber)
+    Write-UcmLog -Message "Found an Invite on line $InviteLineNumber" -Severity 1 -Component $function
+    $CurrentCall.InviteLineNumber = $InviteLineNumber
+    
+    #Find the Called Number Details
+    Write-Progress -Activity "Step $currentStep/$ProgressSteps" -id 1 -Status "Original Called Number" -PercentComplete ((($currentStep) / $ProgressSteps) * 100) ;$currentStep ++
+
     $OriginalCalledNumber = ([regex]::Matches($RawCall,'Received MSG_CC_SETUP message with called#\[(.*)\]').groups[1].value)
     Write-UcmLog -Message "Original Called Number (Digits Dialled) $OriginalCalledNumber" -Severity 1 -Component $function
     $CurrentCall.OriginalCalledNumber = $OriginalCalledNumber
 
-    #Find the Calling Details
+    #Find the Calling Number Details
+    Write-Progress -Activity "Step $currentStep/$ProgressSteps" -id 1 -Status "Original Calling Number" -PercentComplete ((($currentStep) / $ProgressSteps) * 100) ;$currentStep ++
+
     $OriginalCallingNumber = ([regex]::Matches($RawCall,'From: .* <sip:(.*)@').groups[1].value)
     Write-UcmLog -Message "Original Calling Number (Caller ID) $OriginalCallingNumber" -Severity 1 -Component $function
     $CurrentCall.OriginalCallingNumber = $OriginalCallingNumber
 
     #Find the input Route Table
+    Write-Progress -Activity "Step $currentStep/$ProgressSteps" -id 1 -Status "Call Route Table" -PercentComplete ((($currentStep) / $ProgressSteps) * 100) ;$currentStep ++
+
     $RouteTable = ([regex]::Matches($RawCall,'Using table (.*) to route call').groups[1].value)
     Write-UcmLog -Message "Call using Route Table $RouteTable" -Severity 1 -Component $function
     $CurrentCall.RouteTable = $RouteTable
     
-    # Find TransTable Match #ToDo
-    $TransTableMatch = ([regex]::Matches($RawCall,'Transformation table(.*) is a SUCCESS').groups[1].value)
-
-    Write-UcmLog -Message "Call Matched Transformation Table $TransTableMatch" -Severity 1 -Component $function
-  
-    Write-UcmLog -Message "## Call Matched Transformation Table Entries" -Severity 1 -Component $function
-    #Matched Trans Entries
-    #$TransTableTests = (Select-String -InputObject $RawCall -Pattern 'Rule (.*) being tested for selection.' -AllMatches)
-    ForEach($TransTableTestMatch in ($TransTableTests.Matches))   #This is fucked todo
+    # Find Trans Table Matches  TODO This can match more than once?
+    Write-Progress -Activity "Step $currentStep/$ProgressSteps" -id 1 -Status "Trans Table Match" -PercentComplete ((($currentStep) / $ProgressSteps) * 100) ;$currentStep ++
+    $TransTableMatch = ([regex]::Matches($RawCall,'Transformation table\((.*)\) is a SUCCESS').groups[1].value)
+    
+    #This is here for testing. AFAIK This should never hit!
+    $MultiMatchCheck = [regex]::Matches($RawCall,'Transformation table\((.*)\) is a SUCCESS')
+    If ($MultiMatchCheck.count -gt 1)
     {
-      #$TransTableTestMatch.groups[1].value
-      Write-UcmLog -Message "$($TransTableTestMatch.groups[1].value)" -Severity 1 -Component $function
+      Pause
     }
+    
+    Write-UcmLog -Message "Call Matched Transformation Table $TransTableMatch" -Severity 1 -Component $function
+    $CurrentCall.TransTableMatches = $TransTableMatch
+  
+    #Trans Table Entries
+    Write-Progress -Activity "Step $currentStep/$ProgressSteps" -id 1 -Status "Trans Table Entries" -PercentComplete ((($currentStep) / $ProgressSteps) * 100) ;$currentStep ++
+    Write-UcmLog -Message "## Call Matched Transformation Table Entries" -Severity 1 -Component $function
+    
+    #$TransTableTests = (Select-String -InputObject $RawCall -Pattern 'Rule (.*) being tested for selection.' -AllMatches)
+    #ForEach($TransTableTestMatch in ($TransTableTests.Matches))   #This is fucked todo
+    #{
+    #  #$TransTableTestMatch.groups[1].value
+    #  Write-UcmLog -Message "$($TransTableTestMatch.groups[1].value)" -Severity 1 -Component $function
+    #}
+    
+    #Final Trans Table Entry
+    Write-Progress -Activity "Step $currentStep/$ProgressSteps" -id 1 -Status "Matching Trans Table Entry" -PercentComplete ((($currentStep) / $ProgressSteps) * 100) ;$currentStep ++
+    $FinalTransTableMatch = ([regex]::Matches($RawCall,'Successful route request with entry (.*)').groups[1].value)
+    Write-UcmLog -Message "Call Matched Transformation Table Entry $TransTableMatch" -Severity 1 -Component $function
+    $CurrentCall.FinalTranslationRule = $FinalTransTableMatch
+    
  
     #Skipped Trans Entries
+    Write-Progress -Activity "Step $currentStep/$ProgressSteps" -id 1 -Status "Skipped Trans Table Entries" -PercentComplete ((($currentStep) / $ProgressSteps) * 100) ;$currentStep ++
+
     Write-UcmLog -Message "## Disabled Translation Entries Tested" -Severity 1 -Component $function
     $SkippedTransTableTests = (Select-String -InputObject $RawCall -Pattern 'Rule (.*) skipped due to transformation entry disabled.' -AllMatches)
-    ForEach($SkippedTransTableTest in ($SkippedTransTableTests.Matches))   #This is fucked todo
+    
+    #Run through each match and add it to the object
+    ForEach($SkippedTransTableTest in ($SkippedTransTableTests.Matches))
     {
-      #$SkippedTransTableTest.groups[1].value
       Write-UcmLog -Message "$($SkippedTransTableTest.groups[1].value)" -Severity 1 -Component $function
+      $CurrentCall.TransTableEntrySkips = ($CurrentCall.TransTableEntrySkips + $SkippedTransTableTest.groups[1].value)
     }
  
     #Failed Trans Entries
+    Write-Progress -Activity "Step $currentStep/$ProgressSteps" -id 1 -Status "Failed Trans Table Entries" -PercentComplete ((($currentStep) / $ProgressSteps) * 100) ;$currentStep ++
+
     Write-UcmLog -Message "## Failed Translation Entries Tested" -Severity 1 -Component $function
     $FailedTransTableTests = (Select-String -InputObject $RawCall -Pattern 'Transformation table\((.*)\) is a FAILURE' -AllMatches)
     ForEach($FailedTransTableTest in ($FailedTransTableTests.Matches))   #This is fucked todo
     {
-      #$FailedTransTableTest.groups[1].value
+      $CurrentCall.TransTableFailures = ($CurrentCall.TransTableFailures + $FailedTransTableTest.groups[1].value)
       Write-UcmLog -Message "$($FailedTransTableTest.groups[1].value)" -Severity 1 -Component $function
     }
     #Find all Trans Table Tests 
-      
-    #$TransTableTests = ([regex]::Matches($RawCall,'Rule (.*) being tested for selection').groups.value) #Need to get this to return all calls
   
     #Return all tested rules, disabled for now
     #$TransTableTests = (Select-String -InputObject $RawCall -Pattern 'Rule (.*) being tested for selection.' -AllMatches)
@@ -477,6 +534,8 @@ Foreach ($RawCall in $RawCalls)
     
     #Find the Outbound Invite to grab the translated numbers
     #Split the raw call using the invite
+    Write-Progress -Activity "Step $currentStep/$ProgressSteps" -id 1 -Status "Enumerating Invites" -PercentComplete ((($currentStep) / $ProgressSteps) * 100) ;$currentStep ++
+
     $RawInvites = $RawCall -split 'INVITE sip:' -notmatch '^$'
     
     #Set a flag to ensure we actually find the relevant invite
@@ -484,6 +543,7 @@ Foreach ($RawCall in $RawCalls)
     
     ForEach ($rawInvite in $RawInvites) 
     {
+      $currentStep = 12
       #Check the invite matches the known CallID
       #Check we actually have an invite
       if ([regex]::Matches($rawInvite,'cid=(\d*)').count -ne 0)
@@ -492,7 +552,7 @@ Foreach ($RawCall in $RawCalls)
         $InviteCID = ([regex]::Matches($rawInvite,'cid=(\d*)').groups[1].value) 
         Write-UcmLog -Message "Found Invite with the CID of $inviteCID" -Severity 1 -Component $function
         
-        #Found the Invite we care about, lets grab the translated numbers (because they arent logged for some god damn reason)
+        #Found the Invite we care about, lets grab the translated numbers (because they arent logged for some goddamn reason)
         If ($inviteCID -eq $CallID)
         {
           Write-UcmLog -Message "Invite Matches Current Call" -Severity 1 -Component $function
@@ -500,14 +560,24 @@ Foreach ($RawCall in $RawCalls)
           Write-UcmLog -Message "## Translated Numbers" -Severity 1 -Component $function
           
           #Note, we arent looking for the "Invite SIP:" as we used that to split the content
-          $TranslatedCallingNumber = ([regex]::Matches($rawInvite,'(.*)@').groups[1].value)
-          $TranslatedCalledNumber = ([regex]::Matches($rawInvite,'From: .* <sip:(.*)@').groups[1].value)
+          Write-Progress -Activity "Step $currentStep/$ProgressSteps" -id 1 -Status "Translated Calling Number" -PercentComplete ((($currentStep) / $ProgressSteps) * 100) ;$currentStep ++
+      
+          
+          #This regex is really slow, I assume its parsing the entire invite instead of stopping as soon as a match is found
+          #$TranslatedCallingNumber = ([regex]::Matches($rawInvite,'(.*)@').groups[1].value)
+          
+          #Faster Version
+          $TranslatedCalledNumber = ((Select-String -InputObject $rawInvite -Pattern '(.*)@').matches.groups[1].value)
+          
+          Write-Progress -Activity "Step $currentStep/$ProgressSteps" -id 1 -Status "Translated Called Number" -PercentComplete ((($currentStep) / $ProgressSteps) * 100) ;$currentStep ++
+      
+          $TranslatedCallingNumber = ([regex]::Matches($rawInvite,'From: .* <sip:(.*)@').groups[1].value)
           Write-UcmLog -Message "Translated Called Number $TranslatedCalledNumber" -Severity 1 -Component $function
           Write-UcmLog -Message "Translated Calling Number $TranslatedCallingNumber" -Severity 1 -Component $function   
           $CurrentCall.TranslatedCallingNumber = $TranslatedCallingNumber
           $CurrentCall.TranslatedCalledNumber = $TranslatedCalledNumber
         }
-        
+
         Else
         {
           Write-UcmLog -Message "Invite Doesnt Match Current Call, ignoring" -Severity 1 -Component $function
@@ -523,77 +593,21 @@ Foreach ($RawCall in $RawCalls)
     
     If ($InviteFound)
     {
-      Write-UcmLog -Message "Found the Invite for $callID" -Severity 1 -Component $function
-      
-      
+      Write-UcmLog -Message "Found the Invite for $callID" -Severity 1 -Component $function  
     }
+    
     Else
-     {
-      Write-UcmLog -Message "Could not locate invite for $callID" -Severity 3 -Component $function
+    {
+      Write-UcmLog -Message "Could not locate invite for CID $callID" -Severity 3 -Component $function
+      $RawCall | Out-File -filepath "./$callid.txt"
+      #pause
     }
     
     
-    
-
+    #Output the call details to the pipeline
+    $CurrentCall
     
   }
   $CurrentCallNum ++
-  $CurrentCall
+  
 }
-
-
-
-
-
-<#
-
-    Route table
-    Using table NML: From Registrar (7) to route call.
-
-    #Failed Trans Table
-    Rule NML: Route calls to NMLCAUX02 (7.1(32)) being tested for selection.
-    (Transformation Entry Tests)
-    Transformation table(NML: Route to NMLCAUX02:64) is a FAILURE
-
-
-
-    #Sucsess Trans Table
-    Rule Internal 6392 to Core (7.12(19)) being tested for selection.
-    (Transformation Entry Tests)
-    Transformation table(NML: internal 6392:2) is a SUCCESS
-
-
-
-#>
-
-
-
-
-
-
-
-
-
-#End of a good call route.
-#'SIP/2.0 100 Trying'
-
-
-#call found, find its orginal numbers
-
-#Original dialled number
-#[30203][CID:42135] Requesting call route for route table 7, called# [1370]
-
-
-#Route Table
-#(callrouter.cpp:2378) - Using table NML: From Registrar (7) to route call.
-
-
-#Now find all rules that match
-
-#
-#Transformation table(Analog to Telstra:4) is a SUCCESS
-#RegEx 'Transformation table\((.*)\) is a SUCCESS'
-
-#Find the final rule that matches
-#Successful route request with entry NML: Analogue To Telstra (7.14(10))
-#Successful route request with entry Internal 6392 to Core (7.12(19))
