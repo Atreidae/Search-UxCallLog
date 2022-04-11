@@ -21,7 +21,7 @@
     
     .NOTES
 
-    Version                : 0.1.1
+    Version                : 0.2.0
     Date                   : 03/01/2022
     Author                 : James Arber
     Header stolen from     : Greig Sheridan who stole it from Pat Richard's amazing "Get-CsConnections.ps1"
@@ -89,7 +89,7 @@ If (!$script:LogFileLocation)
 [Net.ServicePointManager]::SecurityProtocol = 'tls12, tls11, tls'
 $StartTime                          = Get-Date
 $VerbosePreference                  = 'SilentlyContinue' #TODO
-[String]$ScriptVersion              = '0.1.1'
+[String]$ScriptVersion              = '0.2.0'
 [string]$GithubRepo                 = 'Search-UxCallLog'
 [string]$GithubBranch               = 'master' #todo
 [string]$BlogPost                   = 'https://www.UcMadScientist.com/preparing-for-teams-export-your-on-prem-lis-data-for-cqd/' #todo
