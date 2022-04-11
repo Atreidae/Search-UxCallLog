@@ -60,6 +60,13 @@ Search-UxCallLog will presently output any found call details on the PowerShell 
 
 'FinalTranslationRule' : The Translation Table Entry that caused the Translation Table to Succeed
 
+'OutboundSignallingGroups' : This is currently a plain text string of all the signalling groups listed in the destination route. Will be updated to an array in a later release
+
+'CauseCodeReRoute' : Returns what if any cause code rules were matched and what table the match was on. Otherwise returns "No"
+
+![image](https://user-images.githubusercontent.com/8736291/162686383-86658675-9844-45f6-a871-8d788c50798c.png)
+
+
 ## Known issues
 
 Large amounts of simultaneous calls can cause the script to get confused if invites are logged out of order
@@ -69,3 +76,5 @@ Call Diversion Invites arent handled properly
 If the script presently cant find an appropriate call invite, it will export a text file of that call for later viewing
 
 Check https://github.com/Atreidae/Search-UxCallLog/issues/ for more
+
+Signalling Group matches dont search for the whole number (yet), so seaching for calls terminating on SG 1, will return calls on SG11, 12, 13 etc.
