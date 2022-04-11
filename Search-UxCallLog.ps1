@@ -13,9 +13,18 @@
 
     So I wrote this script to give everyone a simple way to see what rules calls are bouncing off to ease troubleshooting a bit.
 
+    .PARAMETER InputFile
+    The Logfile to check for call logs. Defaults to WebUI.log in the current directory.
+
     .PARAMETER OutboundSignalingGroups
-		Used to find calls that were sent to a particular signalling group.
+    Used to find calls that were sent to a particular signalling group.
     Specify the signaling group number to filter down the list
+
+    .PARAMETER ParseFolder
+    If specified, Search-UxLogFile will ignore the InputFile parameter and instead will attempt to parse every *.log file in the current folder.
+    Handy for checking a whole bunch of log files for a specific call when piped to some filtering or when using the OutboundSignalingGroups parameter.
+    A word of warning, this can be slow and CPU intensive, dont run this on a FrontEnd Server!
+
 
     Created by James Arber. www.UcMadScientist.com
     
@@ -32,6 +41,7 @@
     - Added Cause Code Reroute Flag Property
     - Added Destination Signalling Group Property
     - Added Destination Signalling Group Filtering
+    - Added Folder Parsing
 
     :v0.1: Beta Release
 
@@ -64,6 +74,7 @@
     Call Diversion Invites arent handled properly
     If the script presently cant find an appropriate call invite, it will export a text file of that call for later viewing
     Check https://github.com/Atreidae/Search-UxCallLog/issues/ for more
+    Signalling Group matches dont search for the whole number (yet), so seaching for calls terminating on SG 1, will return calls on SG11, 12, 13 etc.
 
     .EXAMPLE
     Enumerates calls in WebUi.log and outputs each call to the pipeline
@@ -75,6 +86,7 @@
 param
 (
   [switch]$SkipUpdateCheck,
+  [switch]$ParseFolder,
   [String]$script:LogFileLocation = $null,
   [String]$InputFile = "./webui.log",
   [String]$OutboundSignallingGroups = ""
@@ -368,14 +380,29 @@ if ($SkipUpdateCheck -eq $false)
 
 $function = "Read-Logs"
 Write-Progress -Activity "Initial Import" -Status 'Importing Raw Log File'
-Write-UcmLog -Message "Importing Log File" -Severity 1 -Component $function
-$RawLogFile = (Get-Content $InputFile -raw)
 
+
+If ($ParseFolder)
+{
+  #Import all the log files in the current folder and sort them by created date so calls bridging files line up
+  $files = ((Get-ChildItem -Path "." -filter '*.log').FullName|Sort-Object -Property CreationTime)
+  Foreach ($file in $files)
+  {
+    $RawLogFile += (Get-Content $File -raw)
+  }
+}
+
+Else
+{ 
+  #Import the logfile
+  Write-UcmLog -Message "Importing Log File" -Severity 1 -Component $function
+  $RawLogFile = (Get-Content $InputFile -raw)
+}
 
 #Process data.
 
 #Find all the calls that entered the SBC and split them into their own object
-
+$function = "Parse-Invites"
 Write-Progress -Activity "Initial Import" -Status 'Locating Call Markers'
 Write-UcmLog -Message "Locating Calls" -Severity 1 -Component $function
 
@@ -386,33 +413,38 @@ Write-UcmLog -Message "Locating Calls" -Severity 1 -Component $function
 #Method 2
 #$CallLocations = (Select-String -InputObject $RawLogFile -Pattern 'Handling initial invite.' -AllMatches -SimpleMatch)
 
-#Method 3 (Return line numbers)
-$CallLocations =  (Select-String -Path $inputfile -Pattern 'Handling initial invite.')
-$TotalCalls = $CallLocations.Count
+#Method 3 (Return line numbers, doesnt like multi file)
+#$CallLocations =  (Select-String -Path $inputfile -Pattern 'Handling initial invite.')
+
+#Method 4 (Return line numbers)
+$CallLocations =  (Select-String -InputObject $RawLogFile -Pattern 'Handling initial invite.' -AllMatches)
+$TotalCalls = $CallLocations.matches.count
 
 Write-UcmLog -Message "Found $TotalCalls Invites." -Severity 2 -Component $function
 
 #Split the log file using the "Handling Initial Invite Marker (This should work for test calls, not just real calls)
 $RawCalls = $RawLogFile -split 'sendToSipUser: Handling initial invite.' -notmatch '^$'
+
+#Cleanup our lingering memory objects
 Remove-Variable -name "RawLogFile"
 
 
 #Process each Call Object
-
+$function = "Call-ProcessLoop"
 $CurrentCallProgress = 0
 $CurrentCallNum = 0
 
 Foreach ($RawCall in $RawCalls)
 {
-      
   #Skip the first "call" object as it's just whats in the log before the first detected invite
     
   If ($CurrentCallNum -eq 0)
   {
     Write-UcmLog -Message "Skipping Prelogs" -Severity 1 -Component $function
   }
-  #ElseIF ($CurrentCallNum -eq 19) #Todo, only processing one call at the moment
-  Else  #Process whole Logfile
+  
+  #Process the actual call
+  Else 
   {
     $CurrentCallProgress ++
     Write-Progress -Activity "Processing Calls" -Status "Locating Call $CurrentCallProgress of $TotalCalls details"  -PercentComplete ((($CurrentCallProgress) / $TotalCalls) * 100)
@@ -431,54 +463,47 @@ Foreach ($RawCall in $RawCalls)
       'FinalTranslationRule' = 'Unknown'
       'OutboundSignallingGroups' = 'Unknown'
       'CauseCodeReRoute' = 'No'
+      'ReRouteMatch' = 'NA'
       #'RouteFound' = $False
     }
 
     #Setup for Progress Bars
-    $ProgressSteps = 14
+    $ProgressSteps = 16
     $currentStep = 1
     
     
     #Find the Call ID
     Write-Progress -Activity "Step $currentStep/$ProgressSteps" -id 1 -Status "Call ID" -PercentComplete ((($currentStep) / $ProgressSteps) * 100) ;$currentStep ++
-
-    
     $CallID = ([regex]::Matches($RawCall,'\]\[CID:(\d*)\]').groups[1].value)
     Write-UcmLog -Message "# Call ID $CallID" -Severity 1 -Component $function
     $CurrentCall.CallID = $callID
     
     #Greig Asked for time of invite, that goes here
     Write-Progress -Activity "Step $currentStep/$ProgressSteps" -id 1 -Status "Call Time" -PercentComplete ((($currentStep) / $ProgressSteps) * 100) ;$currentStep ++
-
     $CallTime = ([regex]::Matches($RawCall,'\[(.*),...\]').groups[1].value)
     Write-UcmLog -Message "# Call ID $CallID" -Severity 1 -Component $function
     $CurrentCall.CallTime = $CallTime
     
-    
-    #Calculate the LineNumber of the invite
+    #Calculate the LineNumber of the invite (buggy)
     Write-Progress -Activity "Step $currentStep/$ProgressSteps" -id 1 -Status "Call Line Number" -PercentComplete ((($currentStep) / $ProgressSteps) * 100) ;$currentStep ++
-
     $InviteLineNumber = ($CallLocations[($CurrentCallNum -1)].LineNumber)
     Write-UcmLog -Message "Found an Invite on line $InviteLineNumber" -Severity 1 -Component $function
     $CurrentCall.InviteLineNumber = $InviteLineNumber
     
     #Find the Called Number Details
     Write-Progress -Activity "Step $currentStep/$ProgressSteps" -id 1 -Status "Original Called Number" -PercentComplete ((($currentStep) / $ProgressSteps) * 100) ;$currentStep ++
-
     $OriginalCalledNumber = ([regex]::Matches($RawCall,'Received MSG_CC_SETUP message with called#\[(.*)\]').groups[1].value)
     Write-UcmLog -Message "Original Called Number (Digits Dialled) $OriginalCalledNumber" -Severity 1 -Component $function
     $CurrentCall.OriginalCalledNumber = $OriginalCalledNumber
 
     #Find the Calling Number Details
     Write-Progress -Activity "Step $currentStep/$ProgressSteps" -id 1 -Status "Original Calling Number" -PercentComplete ((($currentStep) / $ProgressSteps) * 100) ;$currentStep ++
-
     $OriginalCallingNumber = ([regex]::Matches($RawCall,'From: .* <sip:(.*)@').groups[1].value)
     Write-UcmLog -Message "Original Calling Number (Caller ID) $OriginalCallingNumber" -Severity 1 -Component $function
     $CurrentCall.OriginalCallingNumber = $OriginalCallingNumber
 
     #Find the input Route Table
     Write-Progress -Activity "Step $currentStep/$ProgressSteps" -id 1 -Status "Call Route Table" -PercentComplete ((($currentStep) / $ProgressSteps) * 100) ;$currentStep ++
-
     $RouteTable = ([regex]::Matches($RawCall,'Using table (.*) to route call').groups[1].value)
     Write-UcmLog -Message "Call using Route Table $RouteTable" -Severity 1 -Component $function
     $CurrentCall.RouteTable = $RouteTable
@@ -487,11 +512,13 @@ Foreach ($RawCall in $RawCalls)
     Write-Progress -Activity "Step $currentStep/$ProgressSteps" -id 1 -Status "Trans Table Match" -PercentComplete ((($currentStep) / $ProgressSteps) * 100) ;$currentStep ++
     $TransTableMatch = ([regex]::Matches($RawCall,'Transformation table\((.*)\) is a SUCCESS').groups[1].value)
     
-    #This is here for testing. AFAIK This should never hit!
+    #Check for Multiple Trans table matches
     $MultiMatchCheck = [regex]::Matches($RawCall,'Transformation table\((.*)\) is a SUCCESS')
     If ($MultiMatchCheck.count -gt 1)
     {
-      Write-UcmLog -Message "Call has been Rerouted, Script is untested with reroutes" -Severity 3 -Component $function
+      Write-UcmLog -Message "Multiple Trans Table Matches found. Call $callid might have been Rerouted" -Severity 3 -Component $function
+      Write-UcmLog -Message "ReRouted calls require further testing/development" -Severity 3 -Component $function
+      Write-UcmLog -Message "Please use LX to check findings!" -Severity 3 -Component $function
     }
     
     Write-UcmLog -Message "Call Matched Transformation Table $TransTableMatch" -Severity 1 -Component $function
@@ -590,16 +617,21 @@ Foreach ($RawCall in $RawCalls)
           $CurrentCall.TranslatedCalledNumber = $TranslatedCalledNumber
           
           #Find the Outbound Signalling Group
+          Write-Progress -Activity "Step $currentStep/$ProgressSteps" -id 1 -Status "Locate Outbound Signaling Group" -PercentComplete ((($currentStep) / $ProgressSteps) * 100) ;$currentStep ++
           
           $OutboundSignallingGroup = ((Select-String -InputObject $RawCall -Pattern 'Number of SGs=., SGs={(.*) }').matches.groups[1].value)
           $CurrentCall.OutboundSignallingGroups = $OutboundSignallingGroup
           
           #Find if the call is re-routed
+          Write-Progress -Activity "Step $currentStep/$ProgressSteps" -id 1 -Status "Re-Route Check" -PercentComplete ((($currentStep) / $ProgressSteps) * 100) ;$currentStep ++
           If ($RawCall -match 'Successful cause code reroute check')
           { 
             $Reroute = ((Select-String -InputObject $RawCall -Pattern 'Successful cause code reroute check with (.*)\n').matches.groups[1].value)
             $CurrentCall.CauseCodeReroute = $Reroute
+            $ReRouteMatch = ([regex]::Matches($RawCall,'Transformation table\((.*)\) is a SUCCESS')[1].groups[1].value)
+            $CurrentCall.ReRouteMatch = $ReRouteMatch
             $Reroute = ""
+            $ReRouteMatch = ""
           }
 
         }
@@ -624,7 +656,7 @@ Foreach ($RawCall in $RawCalls)
     
     Else
     {
-      Write-UcmLog -Message "Could not locate invite for CID $callID" -Severity 3 -Component $function
+      Write-UcmLog -Message "Could not locate invite for CID $callID - Check $CallID.txt for call details" -Severity 3 -Component $function
       $RawCall | Out-File -filepath "./$callid.txt"
       #pause
     }
