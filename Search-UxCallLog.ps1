@@ -13,6 +13,9 @@
 
     So I wrote this script to give everyone a simple way to see what rules calls are bouncing off to ease troubleshooting a bit.
 
+    .PARAMETER OutboundSignalingGroups
+		Used to find calls that were sent to a particular signalling group.
+    Specify the signaling group number to filter down the list
 
     Created by James Arber. www.UcMadScientist.com
     
@@ -23,6 +26,12 @@
     Author                 : James Arber
     Header stolen from     : Greig Sheridan who stole it from Pat Richard's amazing "Get-CsConnections.ps1"
 
+
+
+    :v0.2: Beta Release
+    - Added Cause Code Reroute Flag Property
+    - Added Destination Signalling Group Property
+    - Added Destination Signalling Group Filtering
 
     :v0.1: Beta Release
 
@@ -67,7 +76,8 @@ param
 (
   [switch]$SkipUpdateCheck,
   [String]$script:LogFileLocation = $null,
-  [String]$InputFile = "./Webui.log"
+  [String]$InputFile = "./webui.log",
+  [String]$OutboundSignallingGroups = ""
 )
 
 If (!$script:LogFileLocation) 
@@ -419,6 +429,8 @@ Foreach ($RawCall in $RawCalls)
       'TransTableFailures' = @()
       'TransTableEntrySkips' = @()
       'FinalTranslationRule' = 'Unknown'
+      'OutboundSignallingGroups' = 'Unknown'
+      'CauseCodeReRoute' = 'No'
       #'RouteFound' = $False
     }
 
@@ -479,7 +491,7 @@ Foreach ($RawCall in $RawCalls)
     $MultiMatchCheck = [regex]::Matches($RawCall,'Transformation table\((.*)\) is a SUCCESS')
     If ($MultiMatchCheck.count -gt 1)
     {
-      Pause
+      Write-UcmLog -Message "Call has been Rerouted, Script is untested with reroutes" -Severity 3 -Component $function
     }
     
     Write-UcmLog -Message "Call Matched Transformation Table $TransTableMatch" -Severity 1 -Component $function
@@ -576,6 +588,20 @@ Foreach ($RawCall in $RawCalls)
           Write-UcmLog -Message "Translated Calling Number $TranslatedCallingNumber" -Severity 1 -Component $function   
           $CurrentCall.TranslatedCallingNumber = $TranslatedCallingNumber
           $CurrentCall.TranslatedCalledNumber = $TranslatedCalledNumber
+          
+          #Find the Outbound Signalling Group
+          
+          $OutboundSignallingGroup = ((Select-String -InputObject $RawCall -Pattern 'Number of SGs=., SGs={(.*) }').matches.groups[1].value)
+          $CurrentCall.OutboundSignallingGroups = $OutboundSignallingGroup
+          
+          #Find if the call is re-routed
+          If ($RawCall -match 'Successful cause code reroute check')
+          { 
+            $Reroute = ((Select-String -InputObject $RawCall -Pattern 'Successful cause code reroute check with (.*)\n').matches.groups[1].value)
+            $CurrentCall.CauseCodeReroute = $Reroute
+            $Reroute = ""
+          }
+
         }
 
         Else
@@ -604,8 +630,31 @@ Foreach ($RawCall in $RawCalls)
     }
     
     
-    #Output the call details to the pipeline
-    $CurrentCall
+    
+    #Filtering Section
+    
+    # This needs to be cleaned up, but for now
+    
+    If ($OutboundSignallingGroups -ne "")
+    {
+     
+      #check to see if the current call has the right signalling group
+      If ($CurrentCall.outboundsignallinggroups -match $OutboundSignallingGroups)
+      { 
+        #Output the call details to the pipeline
+        $CurrentCall
+      }
+    
+    
+    }
+    Else
+    {
+      #Output the call details to the pipeline
+      $CurrentCall
+    
+    }
+    
+    
     
   }
   $CurrentCallNum ++
