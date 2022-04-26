@@ -33,6 +33,22 @@ To get the Signalling Group ID, in your SBC navigate to Settings > Signalling Gr
 ![image](https://user-images.githubusercontent.com/8736291/162730272-bc3449f3-b352-4691-99ce-5254e28a72f8.png)
 
 
+## Neat Tricks
+
+Looking to find a call that ends routes to a certain signalling group? Use the OutboundSignallingGroup parameter!
+
+`'C:\UcMadScientist\Search-UxCallLog\Search-UxCallLog.ps1' -ParseFolder -OutboundSignallingGroups 2 | ft`
+
+
+Looking for a simple way to filter all the logs in a folder for a call? Just pipe it to PowerShell's Grid View cmdlet.
+
+`Search-UxCallLog.ps1 -ParseFolder | ogv`
+
+![image](https://user-images.githubusercontent.com/8736291/165226957-892cad57-e62a-4965-b990-65f91f618fde.png)
+
+
+
+
 ## Terminology
 
 A quick one to alleviate any confusion if you havent done lots of TransTable work on a Sonus
