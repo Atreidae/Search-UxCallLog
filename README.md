@@ -22,6 +22,33 @@ So I wrote this script to give everyone a simple way to see what rules calls are
 
 #todo
 
+## Parameters
+
+'InputFile' : The file to process, will default to Webut.log if not specified or not parsing the whole folder
+
+'ParseFolder' : Will process every log file in the current directory, useful for audits before turning off signalling groups and avoiding scream tests
+
+'OutboundSignallingGroups' : Will only show calls that match the outbound signalling group ID specified.
+To get the Signalling Group ID, in your SBC navigate to Settings > Signalling Groups and checking the Primary Key for the group you are interested in.
+![image](https://user-images.githubusercontent.com/8736291/162730272-bc3449f3-b352-4691-99ce-5254e28a72f8.png)
+
+
+## Neat Tricks
+
+Looking to find a call that ends routes to a certain signalling group? Use the OutboundSignallingGroup parameter!
+
+`'C:\UcMadScientist\Search-UxCallLog\Search-UxCallLog.ps1' -ParseFolder -OutboundSignallingGroups 2 | ft`
+
+
+Looking for a simple way to filter all the logs in a folder for a call? Just pipe it to PowerShell's Grid View cmdlet.
+
+`Search-UxCallLog.ps1 -ParseFolder | ogv`
+
+![image](https://user-images.githubusercontent.com/8736291/165226957-892cad57-e62a-4965-b990-65f91f618fde.png)
+
+
+
+
 ## Terminology
 
 A quick one to alleviate any confusion if you havent done lots of TransTable work on a Sonus
@@ -63,6 +90,8 @@ Search-UxCallLog will presently output any found call details on the PowerShell 
 'OutboundSignallingGroups' : This is currently a plain text string of all the signalling groups listed in the destination route. Will be updated to an array in a later release
 
 'CauseCodeReRoute' : Returns what if any cause code rules were matched and what table the match was on. Otherwise returns "No"
+
+'ReRouteMatch' : Returns the Translation Table match of the re-routed call.
 
 ![image](https://user-images.githubusercontent.com/8736291/162686383-86658675-9844-45f6-a871-8d788c50798c.png)
 
