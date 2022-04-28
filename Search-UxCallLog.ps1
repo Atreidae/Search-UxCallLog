@@ -30,7 +30,7 @@
     
     .NOTES
 
-    Version                : 0.2.0
+    Version                : 0.2.2
     Date                   : 03/01/2022
     Author                 : James Arber
     Header stolen from     : Greig Sheridan who stole it from Pat Richard's amazing "Get-CsConnections.ps1"
@@ -42,6 +42,7 @@
     - Added Destination Signalling Group Property
     - Added Destination Signalling Group Filtering
     - Added Folder Parsing
+    - Better Error checking for folders
 
     :v0.1: Beta Release
 
@@ -101,7 +102,7 @@ If (!$script:LogFileLocation)
 [Net.ServicePointManager]::SecurityProtocol = 'tls12, tls11, tls'
 $StartTime                          = Get-Date
 $VerbosePreference                  = 'SilentlyContinue' #TODO
-[String]$ScriptVersion              = '0.2.0'
+[String]$ScriptVersion              = '0.2.2'
 [string]$GithubRepo                 = 'Search-UxCallLog'
 [string]$GithubBranch               = 'master' #todo
 [string]$BlogPost                   = 'https://www.UcMadScientist.com/preparing-for-teams-export-your-on-prem-lis-data-for-cqd/' #todo
@@ -386,6 +387,13 @@ If ($ParseFolder)
 {
   #Import all the log files in the current folder and sort them by created date so calls bridging files line up
   $files = ((Get-ChildItem -Path "." -filter '*.log').FullName|Sort-Object -Property CreationTime)
+  
+  #Check for and provide feedback on no log files
+  If ($files.count -eq 0)
+  {
+    Write-UcmLog -Message "No log files to import. Exiting..." -Severity 3 -Component $function
+    Return  
+  }
   Foreach ($file in $files)
   {
     $RawLogFile += (Get-Content $File -raw)
