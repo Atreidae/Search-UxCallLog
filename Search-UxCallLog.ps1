@@ -30,11 +30,15 @@
     
     .NOTES
 
-    Version                : 0.3.0
-    Date                   : 07/03/2023
+    Version                : 0.3.1
+    Date                   : 17/11//2025
     Author                 : James Arber
     Header stolen from     : Greig Sheridan who stole it from Pat Richard's amazing "Get-CsConnections.ps1"
 
+    :v0.3.1: Patch Release
+    - Noted new Ribbon file format, added checks and logic changes to suit
+    Known Bug: Line Numbers are currently reported incorrectly.
+    Note: Removed Code signing Cert whilst I sort a new one
 
     :v0.3: Beta Release
     - Added Code Signing Certificate (Thanks DigiCert)
@@ -104,7 +108,7 @@ If (!$script:LogFileLocation)
 #region config
 [Net.ServicePointManager]::SecurityProtocol = 'tls12, tls11, tls'
 $StartTime                          = Get-Date
-$VerbosePreference                  = 'SilentlyContinue' #TODO
+#$VerbosePreference                  = 'SilentlyContinue' #TODO
 [String]$ScriptVersion              = '0.2.2'
 [string]$GithubRepo                 = 'Search-UxCallLog'
 [string]$GithubBranch               = 'master' #todo
@@ -436,6 +440,33 @@ Write-UcmLog -Message "Found $TotalCalls Invites." -Severity 2 -Component $funct
 #Split the log file using the "Handling Initial Invite Marker (This should work for test calls, not just real calls)
 $RawCalls = $RawLogFile -split 'sendToSipUser: Handling initial invite.' -notmatch '^$'
 
+#Text for "Handling initial invite was changed, check to see if its the new version
+
+If ($RawCalls.count -eq 1)
+{
+    Write-UcmLog -Message "Only found one call, log file may be using new format, testing" -Severity 1 -Component $function
+    $NewRawCalls = $RawLogFile -split 'sendToSipUser:Handling initial invite.' -notmatch '^$'
+    If ($NewRawCalls.count -ge 2)
+    {
+    Write-UcmLog -Message "New invite format detected, parsing" -Severity 1 -Component $function
+    $rawcalls = $NewRawCalls
+    $2025Fileformat = $true
+    }
+
+ }
+ Else
+ {
+ If ($TotalCalls -ge 2)
+    {
+    Write-UcmLog -Message "Found $totalcalls but only found one SIP message, Potential unsupported file format, Please raise an issue!" -Severity 3 -Component $function
+    }
+ }
+
+
+
+        
+
+
 #Cleanup our lingering memory objects
 Remove-Variable -name "RawLogFile"
 
@@ -447,6 +478,7 @@ $CurrentCallNum = 0
 
 Foreach ($RawCall in $RawCalls)
 {
+  Write-UcmLog -Message "Foreach loop, processing call $currentcallNum" -Severity 1 -Component $function
   #Skip the first "call" object as it's just whats in the log before the first detected invite
     
   If ($CurrentCallNum -eq 0)
@@ -497,21 +529,63 @@ Foreach ($RawCall in $RawCalls)
     
     #Calculate the LineNumber of the invite (buggy)
     Write-Progress -Activity "Step $currentStep/$ProgressSteps" -id 1 -Status "Call Line Number" -PercentComplete ((($currentStep) / $ProgressSteps) * 100) ;$currentStep ++
-    $InviteLineNumber = ($CallLocations[($CurrentCallNum -1)].LineNumber)
-    Write-UcmLog -Message "Found an Invite on line $InviteLineNumber" -Severity 1 -Component $function
-    $CurrentCall.InviteLineNumber = $InviteLineNumber
+
+    #this match no longer appears to work
+    #$InviteLineNumber = ($CallLocations[($CurrentCallNum -1)].LineNumber)
+
+    #Todo this is returning incorrect results.
+    $InviteLineNumber = ($CallLocations.matches.captures[($CurrentCallNum -1)].Index)
     
+        If ($InviteLineNumber -eq "")
+        { 
+        Write-UcmLog -Message "Error finding invite line number" -Severity 1 -Component $function
+        $CurrentCall.InviteLineNumber = $InviteLineNumber
+        }
+        else
+        {
+        Write-UcmLog -Message "Found an Invite on line $InviteLineNumber" -Severity 1 -Component $function
+        $CurrentCall.InviteLineNumber = $InviteLineNumber
+        }
+
     #Find the Called Number Details
     Write-Progress -Activity "Step $currentStep/$ProgressSteps" -id 1 -Status "Original Called Number" -PercentComplete ((($currentStep) / $ProgressSteps) * 100) ;$currentStep ++
-    $OriginalCalledNumber = ([regex]::Matches($RawCall,'Received MSG_CC_SETUP message with called#\[(.*)\]').groups[1].value)
-    Write-UcmLog -Message "Original Called Number (Digits Dialled) $OriginalCalledNumber" -Severity 1 -Component $function
-    $CurrentCall.OriginalCalledNumber = $OriginalCalledNumber
+    
+    #Old logs removed from 9.x 
+    #$OriginalCalledNumber = ([regex]::Matches($RawCall,'Received MSG_CC_SETUP message with called#\[(.*)\]').groups[1].value)
+
+    #use the invite instead
+    $OriginalCalledNumber = ([regex]::Matches($RawCall,'To: .*<sip:(.*)@').groups[1].value) 
+    
+     If ($OriginalCalledNumber -eq "")
+        { 
+            Write-UcmLog -Message "Error finding called number" -Severity 3 -Component $function
+        }
+        else
+        {
+
+            Write-UcmLog -Message "Original Called Number (Digits Dialled) $OriginalCalledNumber" -Severity 1 -Component $function
+            $CurrentCall.OriginalCalledNumber = $OriginalCalledNumber
+        }
+
+
 
     #Find the Calling Number Details
     Write-Progress -Activity "Step $currentStep/$ProgressSteps" -id 1 -Status "Original Calling Number" -PercentComplete ((($currentStep) / $ProgressSteps) * 100) ;$currentStep ++
-    $OriginalCallingNumber = ([regex]::Matches($RawCall,'From: .* <sip:(.*)@').groups[1].value)
-    Write-UcmLog -Message "Original Calling Number (Caller ID) $OriginalCallingNumber" -Severity 1 -Component $function
-    $CurrentCall.OriginalCallingNumber = $OriginalCallingNumber
+    $OriginalCallingNumber = ([regex]::Matches($RawCall,'From: .*<sip:(.*)@').groups[1].value) 
+ 
+
+     If ($OriginalCallingNumber -eq "")
+        { 
+            Write-UcmLog -Message "Error finding calling number" -Severity 3 -Component $function
+        }
+        else
+        {
+
+            Write-UcmLog -Message "Original Calling Number (Caller ID) $OriginalCallingNumber" -Severity 1 -Component $function
+            $CurrentCall.OriginalCallingNumber = $OriginalCallingNumber
+        }
+
+
 
     #Find the input Route Table
     Write-Progress -Activity "Step $currentStep/$ProgressSteps" -id 1 -Status "Call Route Table" -PercentComplete ((($currentStep) / $ProgressSteps) * 100) ;$currentStep ++
@@ -703,101 +777,3 @@ Foreach ($RawCall in $RawCalls)
   $CurrentCallNum ++
   
 }
-
-# SIG # Begin signature block
-# MIIRwgYJKoZIhvcNAQcCoIIRszCCEa8CAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
-# gjcCAQSgWzBZMDQGCisGAQQBgjcCAR4wJgIDAQAABBAfzDtgWUsITrck0sYpfvNR
-# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQU0Qyd9sa3l17giIWTB+NKvBc6
-# f6+ggg4OMIIGsDCCBJigAwIBAgIQCK1AsmDSnEyfXs2pvZOu2TANBgkqhkiG9w0B
-# AQwFADBiMQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYD
-# VQQLExB3d3cuZGlnaWNlcnQuY29tMSEwHwYDVQQDExhEaWdpQ2VydCBUcnVzdGVk
-# IFJvb3QgRzQwHhcNMjEwNDI5MDAwMDAwWhcNMzYwNDI4MjM1OTU5WjBpMQswCQYD
-# VQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQsIEluYy4xQTA/BgNVBAMTOERpZ2lD
-# ZXJ0IFRydXN0ZWQgRzQgQ29kZSBTaWduaW5nIFJTQTQwOTYgU0hBMzg0IDIwMjEg
-# Q0ExMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEA1bQvQtAorXi3XdU5
-# WRuxiEL1M4zrPYGXcMW7xIUmMJ+kjmjYXPXrNCQH4UtP03hD9BfXHtr50tVnGlJP
-# DqFX/IiZwZHMgQM+TXAkZLON4gh9NH1MgFcSa0OamfLFOx/y78tHWhOmTLMBICXz
-# ENOLsvsI8IrgnQnAZaf6mIBJNYc9URnokCF4RS6hnyzhGMIazMXuk0lwQjKP+8bq
-# HPNlaJGiTUyCEUhSaN4QvRRXXegYE2XFf7JPhSxIpFaENdb5LpyqABXRN/4aBpTC
-# fMjqGzLmysL0p6MDDnSlrzm2q2AS4+jWufcx4dyt5Big2MEjR0ezoQ9uo6ttmAaD
-# G7dqZy3SvUQakhCBj7A7CdfHmzJawv9qYFSLScGT7eG0XOBv6yb5jNWy+TgQ5urO
-# kfW+0/tvk2E0XLyTRSiDNipmKF+wc86LJiUGsoPUXPYVGUztYuBeM/Lo6OwKp7AD
-# K5GyNnm+960IHnWmZcy740hQ83eRGv7bUKJGyGFYmPV8AhY8gyitOYbs1LcNU9D4
-# R+Z1MI3sMJN2FKZbS110YU0/EpF23r9Yy3IQKUHw1cVtJnZoEUETWJrcJisB9IlN
-# Wdt4z4FKPkBHX8mBUHOFECMhWWCKZFTBzCEa6DgZfGYczXg4RTCZT/9jT0y7qg0I
-# U0F8WD1Hs/q27IwyCQLMbDwMVhECAwEAAaOCAVkwggFVMBIGA1UdEwEB/wQIMAYB
-# Af8CAQAwHQYDVR0OBBYEFGg34Ou2O/hfEYb7/mF7CIhl9E5CMB8GA1UdIwQYMBaA
-# FOzX44LScV1kTN8uZz/nupiuHA9PMA4GA1UdDwEB/wQEAwIBhjATBgNVHSUEDDAK
-# BggrBgEFBQcDAzB3BggrBgEFBQcBAQRrMGkwJAYIKwYBBQUHMAGGGGh0dHA6Ly9v
-# Y3NwLmRpZ2ljZXJ0LmNvbTBBBggrBgEFBQcwAoY1aHR0cDovL2NhY2VydHMuZGln
-# aWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZFJvb3RHNC5jcnQwQwYDVR0fBDwwOjA4
-# oDagNIYyaHR0cDovL2NybDMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZFJv
-# b3RHNC5jcmwwHAYDVR0gBBUwEzAHBgVngQwBAzAIBgZngQwBBAEwDQYJKoZIhvcN
-# AQEMBQADggIBADojRD2NCHbuj7w6mdNW4AIapfhINPMstuZ0ZveUcrEAyq9sMCcT
-# Ep6QRJ9L/Z6jfCbVN7w6XUhtldU/SfQnuxaBRVD9nL22heB2fjdxyyL3WqqQz/WT
-# auPrINHVUHmImoqKwba9oUgYftzYgBoRGRjNYZmBVvbJ43bnxOQbX0P4PpT/djk9
-# ntSZz0rdKOtfJqGVWEjVGv7XJz/9kNF2ht0csGBc8w2o7uCJob054ThO2m67Np37
-# 5SFTWsPK6Wrxoj7bQ7gzyE84FJKZ9d3OVG3ZXQIUH0AzfAPilbLCIXVzUstG2MQ0
-# HKKlS43Nb3Y3LIU/Gs4m6Ri+kAewQ3+ViCCCcPDMyu/9KTVcH4k4Vfc3iosJocsL
-# 6TEa/y4ZXDlx4b6cpwoG1iZnt5LmTl/eeqxJzy6kdJKt2zyknIYf48FWGysj/4+1
-# 6oh7cGvmoLr9Oj9FpsToFpFSi0HASIRLlk2rREDjjfAVKM7t8RhWByovEMQMCGQ8
-# M4+uKIw8y4+ICw2/O/TOHnuO77Xry7fwdxPm5yg/rBKupS8ibEH5glwVZsxsDsrF
-# hsP2JjMMB0ug0wcCampAMEhLNKhRILutG4UI4lkNbcoFUCvqShyepf2gpx8GdOfy
-# 1lKQ/a+FSCH5Vzu0nAPthkX0tGFuv2jiJmCG6sivqf6UHedjGzqGVnhOMIIHVjCC
-# BT6gAwIBAgIQDyLHeeRvkUFg5QtSFTT8FjANBgkqhkiG9w0BAQsFADBpMQswCQYD
-# VQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQsIEluYy4xQTA/BgNVBAMTOERpZ2lD
-# ZXJ0IFRydXN0ZWQgRzQgQ29kZSBTaWduaW5nIFJTQTQwOTYgU0hBMzg0IDIwMjEg
-# Q0ExMB4XDTIzMDIyMzAwMDAwMFoXDTI2MDIyMzIzNTk1OVowXjELMAkGA1UEBhMC
-# QVUxETAPBgNVBAgTCFZpY3RvcmlhMRAwDgYDVQQHEwdCZXJ3aWNrMRQwEgYDVQQK
-# EwtKYW1lcyBBcmJlcjEUMBIGA1UEAxMLSmFtZXMgQXJiZXIwggIiMA0GCSqGSIb3
-# DQEBAQUAA4ICDwAwggIKAoICAQC47oExh25TrxvApIYdMRYvjOdZCb8WwgeTemm3
-# ZY7BElIWu6+gzRGqQe8RFsN7oIgin5pvjTYIToxt1CCag2A5o8L0NtULmxJEegc+
-# VaF24DZQqI4qGQGH/Qnglqys6+yPkwLnfeSxpeWe4u49HUUGDFIxHCh42MlCLp/f
-# fHT49QhhpO+LyeLnDoUs6DmahyIb6NeE2cW5AYRXEesW7GRNfXzygBSlVWJOgvcy
-# V5Y4IvAZVx2hKKMTjYFIz4/RYMg7fwYZEJ2LRJ/GnVazobKAvh6ZBet5KwVNI9EI
-# 29DtWQyK/RoPOguTRcB5VuiZVlv0xjBYM7iJuH2Soa3StQYVxL/5gjZCC9WOs4NR
-# EIGU3XmHoogFDvoT1vf1izMPFQzdZfgPvy/XXsbgTVo5ncesJ6WtZwqwCXG1K0XW
-# IPZqTHolc1MyU6K1bEHO+7YWLpKgM9THl644G7PEhcKpNDsHlfvLVQdYhI55UJtc
-# iyMrTw11CNECvk3GK1mrluvKsrxdaH6G3Sp9VVHRtef6OZ5SlzkM5ID4egB2bXRb
-# R/69bEuZr5hhm+v2lBSWIbZj/Mva6i/a/TAvy4vvPLo3DRcASkYZDC4T8gDMzmpG
-# Xs4jAc9sfTL9z+o5u1PLJHFGRjJ+Wa2CgSftCdbKLjn+AY9m8ipc8jmOBKNY9yGI
-# pQWapQIDAQABo4ICAzCCAf8wHwYDVR0jBBgwFoAUaDfg67Y7+F8Rhvv+YXsIiGX0
-# TkIwHQYDVR0OBBYEFOBsg1xudlbXVSql8pWbiHoTyZS/MA4GA1UdDwEB/wQEAwIH
-# gDATBgNVHSUEDDAKBggrBgEFBQcDAzCBtQYDVR0fBIGtMIGqMFOgUaBPhk1odHRw
-# Oi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNlcnRUcnVzdGVkRzRDb2RlU2lnbmlu
-# Z1JTQTQwOTZTSEEzODQyMDIxQ0ExLmNybDBToFGgT4ZNaHR0cDovL2NybDQuZGln
-# aWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0Q29kZVNpZ25pbmdSU0E0MDk2U0hB
-# Mzg0MjAyMUNBMS5jcmwwPgYDVR0gBDcwNTAzBgZngQwBBAEwKTAnBggrBgEFBQcC
-# ARYbaHR0cDovL3d3dy5kaWdpY2VydC5jb20vQ1BTMIGUBggrBgEFBQcBAQSBhzCB
-# hDAkBggrBgEFBQcwAYYYaHR0cDovL29jc3AuZGlnaWNlcnQuY29tMFwGCCsGAQUF
-# BzAChlBodHRwOi8vY2FjZXJ0cy5kaWdpY2VydC5jb20vRGlnaUNlcnRUcnVzdGVk
-# RzRDb2RlU2lnbmluZ1JTQTQwOTZTSEEzODQyMDIxQ0ExLmNydDAJBgNVHRMEAjAA
-# MA0GCSqGSIb3DQEBCwUAA4ICAQBOh5vRXqTCQzv0T1F2EgDkq5VnljlHsa7Ov/d/
-# lpOvr8NebBiatxbhfhPCnToY7BD2f7YVsUuQ+VDdcIYsskcU5spBHcFYidg2jGu4
-# 59FGMaS765XStDwGGTN/360gEsNYSnKWYL4+8jYWHlzRO0jHloyWz+gF5dYWzdDJ
-# u1dudLIJ0RgrEVJeLSgIBWygLL5EyIzOPlrxztsILMSbdPTQLeBIm7ipOk4EACx1
-# hhBVUsUoCAlASH+yCKDU4v2HFd7SzrkRUrf7XJ2Na2YsiHjiTGqHIE86KyvxGDhT
-# 3n2/jX23Nh/bkWHurHwTfaTCOQ44ZlAbnZQjBlmrFn5hPMXRpciiQFmrKTPD/nuo
-# 9MVnCciHEpHJ63/JZNF/eno1122/wVkL7MuRlCVHN7L/wuNQxQk3ARdIju6OD/Gi
-# Mwg0Qih6HVWJtkHK3ExoUKKKUZCOvIeHxzp+K6FWUupPZKUgWzn4AHMxm6zr+Sde
-# laIAACqAkxYsDYKbM7WlNi3uIH2HeXqU9uSDt5tgPpImrog/ab4HrhpDfITRgT1c
-# cxaWQezpJEPC+kqVD41T3wlEie1Qm4vYWg+oBVEMBxVLh6CYbeppCRTEXRGnAiCH
-# /Ma1uwyWnNCWxrhd1uSi6sj4ISzgnFyGCvsI0gavKpS5AQhapJgk6/fULTFeS+Ee
-# kRH9FDGCAx4wggMaAgEBMH0waTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lD
-# ZXJ0LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IENvZGUgU2ln
-# bmluZyBSU0E0MDk2IFNIQTM4NCAyMDIxIENBMQIQDyLHeeRvkUFg5QtSFTT8FjAJ
-# BgUrDgMCGgUAoHgwGAYKKwYBBAGCNwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0B
-# CQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAj
-# BgkqhkiG9w0BCQQxFgQUxe4tZO0VkNXJDBv+fYqCK1JRBWYwDQYJKoZIhvcNAQEB
-# BQAEggIAP+avQ2xxSTn3+zEKHayWF43GLGkA1TQmlofXJYRlQGtWPpJ6ypxqQpen
-# 1rKQxiIHx5vPYgwFQXIVIw5OVCd7TkkKvxyqJB1O26Muu6YuWQ+Tgpfeu+czEjJ6
-# X0t1cjwURONFUazh4hckNkRoL2d2CGA1dGVUJiDMuGRAKpJBzPm8x4SEFSqu/oBu
-# VX2/dVtk2M9woyGdlsObTlbGimsSiMdULYChOcvSwuL41xB22KnX3cs1lB2DZ7Ge
-# avWmc3BlVWZ39U93ulxhOky97LJJRLvzNmlNxONnNeDmahrrbT4PiYGvAWiFDYQ2
-# wsR0BRbPHRxMlLC+Ej9isnXHn8mN5P8s5U+1z/DCCkr2dVUt5WyNNVQC8zllYRPp
-# C00fB7i/YfyZoC3WZW1nRmZUemZeSGTTr4U6ldim4y0VcDuw/WMFMuw/M0C8Gqx4
-# vUtzVgSc1+1pUeDcvfmH06haijSAADTBVch85rI4mZ+hPisGnzjfmjlClVY7jg3f
-# WlukGuaooYG65QVV5/d3bRO5u1lmEoRaxVHrIsj6ebcNrAdMSd9sRL9eJZPMVreK
-# hCEYtcIFn7FbHRN/3A514/9qU4qyl4MCEMW3sbg4lv1p0wedGyVQiH7IAMqKfPsP
-# A3w8/Ao+i7V7Bj/AawbzRvBT3vc8RmU32B4LlI024OtvJOBUhYU=
-# SIG # End signature block
