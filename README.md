@@ -107,3 +107,5 @@ If the script presently cant find an appropriate call invite, it will export a t
 Check https://github.com/Atreidae/Search-UxCallLog/issues/ for more
 
 Signalling Group matches dont search for the whole number (yet), so seaching for calls terminating on SG 1, will return calls on SG11, 12, 13 etc.
+
+Line Numbers are currently being reported incorrectly. It's on the Todo List!
