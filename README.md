@@ -1,111 +1,112 @@
-# Search-UxCallLog.ps1
+# 🔎 Search-UxCallLog.ps1
 
-This is a tool to search through Sonus/Ribbon SBC call logs and display associated routing information
+Search-UxCallLog.ps1 parses Sonus/Ribbon SBC UX logs and outputs call routing details to the PowerShell pipeline. It is designed to provide a lightweight alternative to LX for day-to-day troubleshooting.
 
-## DESCRIPTION
+## ❓ Why this exists
 
-This tool does it's best to display call routes from Sonus/Ribbon UX logfiles in a friendly manner without needing tools like LX installed
+Pulling logs out of customer environments and opening LX just to inspect routing is a pain. This script makes it easy to understand which route/translation rules a call hit without extra tooling.
 
-## Why?
+## ✅ Requirements
 
-I got so sick and tired of firing up LX every single time a call went "awry" when customers called only to find someone else had re-installed LX on their profile causing the installation to break on mine
-For people that only support a pair of SBC's maybe you can just run LX on your PC.. but for consultants, we have to get the files off the SBC.. then out of the customers environment and thats usualy a PITA. 
-Needless to say, even with LX you still need to read all the ROUTE entries by hand anyway.
+- Windows PowerShell or PowerShell 7
+- Access to SBC WebUI.log files (or exported log bundles)
 
-So I wrote this script to give everyone a simple way to see what rules calls are bouncing off to ease troubleshooting a bit.
+## 🧠 Terminology
 
-## Build Status
+Ribbon/Sonus routing typically flows in this order:
 
-#todo
+1. A call arrives on an inbound signalling group.
+2. The SBC selects the associated Route Table.
+3. Each **Route Table** entry references a **Translation Table**.
+4. A **Translation Table** contains multiple **Translation Entries** (typically regex rules).
+5. If all relevant entries match (e.g., called and calling), the **Translation Table** succeeds.
+6. The first successful Translation Table determines the outbound route/signalling group.
 
-## Tests
+**Remember:** It's very possible to have a **Translation Table Entry** match, but the **Translation Table** as a whole fails because not all the tests have passed (both called and calling for example)
 
-#todo
+In short:
 
-## Parameters
+Inbound Call → Route Table → Translation Table(s) → Translation Entry matches → Outbound route
 
-'InputFile' : The file to process, will default to Webut.log if not specified or not parsing the whole folder
+- Translation Table Entry: A single regex rule that matches one attribute (e.g., called or calling).
+- Translation Table: A set of entries; the table succeeds when all relevant entries match.
+- Route Table: Maps inbound signalling groups to destination routes based on translation table results.
 
-'ParseFolder' : Will process every log file in the current directory, useful for audits before turning off signalling groups and avoiding scream tests
+_I have tottally never ever gotten confused by this whilst writing this script /s_
 
-'OutboundSignallingGroups' : Will only show calls that match the outbound signalling group ID specified.
-To get the Signalling Group ID, in your SBC navigate to Settings > Signalling Groups and checking the Primary Key for the group you are interested in.
-![image](https://user-images.githubusercontent.com/8736291/162730272-bc3449f3-b352-4691-99ce-5254e28a72f8.png)
+## 🚀 Usage
 
+### Parse a single log file (default is ./webui.log):
 
-## Neat Tricks
+> Search-UxCallLog.ps1 -InputFile .\WebUI.log
 
-Looking to find a call that ends routes to a certain signalling group? Use the OutboundSignallingGroup parameter!
+### Parse all .log files in the current folder:
 
-`'C:\UcMadScientist\Search-UxCallLog\Search-UxCallLog.ps1' -ParseFolder -OutboundSignallingGroups 2 | ft`
+> Search-UxCallLog.ps1 -ParseFolder
 
+### Parse all .log files in a specific folder:
 
-Looking for a simple way to filter all the logs in a folder for a call? Just pipe it to PowerShell's Grid View cmdlet.
+> Search-UxCallLog.ps1 -ParseFolder -Path C:\Logs\SBC01
 
-`Search-UxCallLog.ps1 -ParseFolder | ogv`
+### Filter to calls routed to a specific signalling group and view in grid:
 
-![image](https://user-images.githubusercontent.com/8736291/165226957-892cad57-e62a-4965-b990-65f91f618fde.png)
+> Search-UxCallLog.ps1 -ParseFolder -OutboundSignallingGroups 2 | ogv
 
+## ⚙️ Parameters
 
+- InputFile
+  The log file to process. Defaults to ./webui.log when not using -ParseFolder.
 
+- ParseFolder
+  When set, process all .log files in a folder (current folder by default).
 
-## Terminology
+- Path
+  Optional path to parse when -ParseFolder is set. If omitted, the current working folder is used.
 
-A quick one to alleviate any confusion if you havent done lots of TransTable work on a Sonus
+- OutboundSignallingGroups
+  Filters output to calls routed to a specific signalling group ID.
 
-A "Translation Table Entry" is a single RegEx rule that matches a single attribute, IE a Called Number or a Calling Number. but not both
+## 🧾 Output
 
-A "Translation Table" contains multiple Table Entries and can have multiple *entries* match, if all the relevant properties match (IE, both called and calling) then the *table* is deemed sucsessful
+Each call is emitted as a PowerShell object with these properties:
 
-A "Route Table" contains multiple Translation Tables, each mapping to a destination *signalling group* a route table is determined by the signalling group the call arrives on and the destination signalling group is determined by what *translation table* is successful first
+### Call Details
 
-## Output
+- **CallID:** The SBC internal call ID (also visible in X-Sonus-Diagnostics headers).
+- **CallTime:** Timestamp of the initial invite processing.
+- **InviteLineNumber:** The line number where the SBC logged “Handling initial invite.” (can be inaccurate).
 
-Search-UxCallLog will presently output any found call details on the PowerShell Pipeline, each call is an object, with the following properties
+### Call Routing
 
-'CallID' : The SBC's internal call ID for the found invite, can be found in the X-Sonus-Diagnostics headers in the Invite
+- **RouteTable:** Route table used by the SBC for the inbound invite.
+- **Unroutable:** Set to True if the SBC couldnt find a route for this call
+- **OutboundSignallingGroups:** Destination signalling group selected for the call.
+- **CauseCodeReRoute:** Cause code reroute result (or “No” if none).
+- **ReRouteMatch:** Transformation table match for the re-routed call.
+- **OriginalCallingNumber:** Calling party number as logged by the SBC.
+- **OriginalCalledNumber:** Called party number as logged by the SBC.
+- **TranslatedCallingNumber:** Calling party number used in the first outbound invite for this call.
+- **TranslatedCalledNumber:** Called party number used in the first outbound invite for this call.
 
-'CallTime' : The time the SBC processed the initial invite
+### Transformation Table Related
 
-'InviteLineNumber' : The line number in the log that the SBC logged "Handling initial invite."
-
-'OriginalCallingNumber' : The calling party's number as logged by the SBC
-
-'OriginalCalledNumber' : The called party's number as logged by the SBC
-
-'TranslatedCallingNumber' : The called party's number used in the first outbound Invite for the Call ID above
-
-'TranslatedCalledNumber' : The calling party's number used in the first outbound Invite for the Call ID above
-
-'RouteTable' : The route table used by the SBC for the inbound Invite
-
-'TransTableMatches' : The Translation Table that caused the SBC to send a new outbound invite
-
-'TransTableFailures' : The Translation Tables that were tested before the sucessful table was found
-
-'TransTableEntrySkips' : The Translation Table Entries that were skipped because they are disabled.
-
-'FinalTranslationRule' : The Translation Table Entry that caused the Translation Table to Succeed
-
-'OutboundSignallingGroups' : This is currently a plain text string of all the signalling groups listed in the destination route. Will be updated to an array in a later release
-
-'CauseCodeReRoute' : Returns what if any cause code rules were matched and what table the match was on. Otherwise returns "No"
-
-'ReRouteMatch' : Returns the Translation Table match of the re-routed call.
-
-![image](https://user-images.githubusercontent.com/8736291/162686383-86658675-9844-45f6-a871-8d788c50798c.png)
+- **TransformationTableMatches:** Transformation tables that matched for the call.
+- **TransformationTableFailures:** Transformation tables tested before the successful match.
+- **TransformationRuleMatches:** Transformation rule entries that matched.
+- **TransformationRuleFailures:** Transformation rule entries that were tested, but failed.
+- **TransformationRuleSkips:** Transformation rule entries skipped because they’re disabled.
+- **FinalTransformationRule:** The rule entry that caused the translation to succeed.
 
 
-## Known issues
 
-Large amounts of simultaneous calls can cause the script to get confused if invites are logged out of order
+## ⚠️ Known issues
 
-Call Diversion Invites arent handled properly
+- Large volumes of simultaneous calls can confuse invite ordering.
+- Call diversion invites are not handled correctly yet.
+- If an invite cannot be found, the script exports that call to a text file for later review.
+- Signalling Group filtering currently uses partial matches (IE: SG 1 may match SG11/12/13).
+- Invite line numbers can be inaccurate.
 
-If the script presently cant find an appropriate call invite, it will export a text file of that call for later viewing
+## 🆘 Support
 
-Check https://github.com/Atreidae/Search-UxCallLog/issues/ for more
-
-Signalling Group matches dont search for the whole number (yet), so seaching for calls terminating on SG 1, will return calls on SG11, 12, 13 etc.
-
-Line Numbers are currently being reported incorrectly. It's on the Todo List!
+Issues and requests: [github.com/Atreidae/Search-UxCallLog/issues](https://github.com/Atreidae/Search-UxCallLog/issues/)
